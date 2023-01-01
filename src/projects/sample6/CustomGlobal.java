@@ -38,6 +38,9 @@ package projects.sample6;
 
 
 import java.awt.Color;
+import java.util.Comparator;
+import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Vector;
 import java.util.stream.Collectors;
 
@@ -73,27 +76,32 @@ import sinalgo.tools.logging.Logging;
  * added to the GUI. 
  */
 public class CustomGlobal extends AbstractCustomGlobal{
-	
 
+	// From sinalgo tutorial, page 29-30 (pdf)
+	Logging logger = Logging.getLogger();
+
+	public static int SIX_VCOL_SIMULATION_ROUNDS = -1;
+	public static int SIX_VCOL_MAX_COLOR_BITS = -1;
+	public static int NUM_OF_NODES = -1;
 	
 	@Override
 	public void preRun() {
-		// Build default tree with 10 leafs, 2 fanOut. This is useful for debugging, since I need to build it manually each time.
+		// Build default tree with 10 leafs, 2 fanOut. 
+		// This is useful for debugging, since I need to build it manually each time.
+		// User can click on "build tree" to override this.
 		buildTree(2, 10);
 	}
 	
-//	// From sinalgo tutorial, page 29-30 (pdf)
-//	Logging logger = Logging.getLogger();
-//	@Override
-//	public void preRound() {
-//		super.preRound();
-//		
-//		// Output to log console interesting stuff
-//		long total_unique_colors = this.treeNodes.stream().distinct().count();
-//		logger.logln("Total unique colors: " + total_unique_colors);
-//	}
-
-
+	/*
+	 * Calculate log * n by given n.
+	 * Example: 2^256 => log * 2^256 = 4
+	 */
+	private int log_star_n(int n) {
+		if (n < 2)
+			return 0;
+		else
+			return 1 + log_star_n((int) (Math.log(n) / Math.log(2)));
+	}
 
 	/* (non-Javadoc)
 	 * @see runtime.AbstractCustomGlobal#hasTerminated()
@@ -142,6 +150,7 @@ public class CustomGlobal extends AbstractCustomGlobal{
 	 * @param numLeaves The number of leaf-nodes the tree should contain.
 	 */
 	public void buildTree(int fanOut, int numLeaves) {
+		logger.logln("Building tree, fanOut: " + fanOut + ", numLeaves: " + numLeaves);
 		if(fanOut < 2) {
 			Tools.showMessageDialog("The fanOut needs to be at least 2.\nCreation of tree aborted.");
 			return; 
@@ -224,7 +233,25 @@ public class CustomGlobal extends AbstractCustomGlobal{
 		
 		// Repaint the GUI as we have added some nodes
 		Tools.repaintGUI();
+		
+		// Output to log console interesting stuff
+		long total_unique_colors = this.treeNodes.stream().distinct().count();
+		total_unique_colors += this.leaves.stream().distinct().count();
+		int largest_color = this.treeNodes.stream().mapToInt(node -> node.six_vcol_color).max().getAsInt();
+		int total_nodes = this.treeNodes.size() + this.leaves.size();
+		
+		logger.logln("Total nodes: " + total_nodes);
+		logger.logln("Total unique colors: " + total_unique_colors);
+		String largest_color_binary = Integer.toBinaryString(largest_color);
+		logger.logln("Largest color: "+largest_color+", binary: "+largest_color_binary+", bits: "+largest_color_binary.length());
+		
+		
+		int six_vcol_simulation_rounds = log_star_n(largest_color);
+		logger.logln("The six_vcol algorithm will take: log*("+largest_color+") = "+six_vcol_simulation_rounds+" rounds.");
+		
+		// Setup global initial variables (all nodes can calculate this at the start of the simulation).
+		SIX_VCOL_SIMULATION_ROUNDS = six_vcol_simulation_rounds;
+		SIX_VCOL_MAX_COLOR_BITS = largest_color_binary.length();
+		NUM_OF_NODES = total_nodes;
 	}
-	
-	
 }

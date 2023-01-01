@@ -32,6 +32,14 @@ public class MyEdge extends BidirectionalEdge {
 			int x = (int) ((toX + fromX)/2);
 			int y = (int) ((toY + fromY)/2);
 			
+			if (TreeNode.FLAG_MIS_STARTED_GLOBAL == true) {
+				int x_diff = toX - fromX;
+				int y_diff = toY - fromY;
+				
+				x -= x_diff / 4;
+				y -= y_diff / 4;
+			}
+			
 			//logger.logln("Drawing edge string: " + this.message_on_edge + " on location: (" + x + ", " + y + ")");
 			g.drawString(message_on_edge, x, y);
 		}
@@ -40,7 +48,6 @@ public class MyEdge extends BidirectionalEdge {
 	@Override
 	public void addMessageForThisEdge(Message msg) {
 		super.addMessageForThisEdge(msg);
-		//logger.logln("addMessageForThisEdge message: " + msg);
 		message_on_edge = msg.toString();
 	}
 }

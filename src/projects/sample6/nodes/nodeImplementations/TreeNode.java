@@ -3,16 +3,24 @@ package projects.sample6.nodes.nodeImplementations;
 
 
 import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
+import java.util.ArrayList;
 
 import projects.matala12.nodes.messages.RoundColorMessage;
+import projects.sample6.CustomGlobal;
 import projects.sample6.nodes.messages.SixVcol.ColorMessage;
+import projects.sample6.nodes.messages.Vcol_MIS.DecidedMessage;
+import projects.sample6.nodes.messages.Vcol_MIS.RoundMessage;
+import projects.sample6.nodes.messages.Vcol_MIS.UndecidedMessage;
 import sinalgo.configuration.WrongConfigurationException;
 import sinalgo.gui.transformation.PositionTransformation;
 import sinalgo.nodes.Node;
 import sinalgo.nodes.edges.Edge;
 import sinalgo.nodes.messages.Inbox;
 import sinalgo.nodes.messages.Message;
+import sinalgo.tools.Tools;
 import sinalgo.tools.logging.Logging;
 
 /**
@@ -27,8 +35,23 @@ public class TreeNode extends Node {
 	
 	public int six_vcol_color = -1; // Possible values: 0..5. At the start, there is N colors. After the algo finishes, there are 6 colors maximum.
 	private boolean flag_sixVcol_started = false; // Used only for the root to start the algorithm.
-	private int round = 0;
+	private int round = 1;
 	private boolean flag_sixVcol_finished = false; // Used locally for each node to change their draw function
+	private int six_vcol_current_round_bits = -1;
+	
+	private int mis_round = 0;
+	private boolean flag_mis_started = false;
+	public static boolean FLAG_MIS_STARTED_GLOBAL = false; // Used for MyEdge to draw 2 strings on the same edge so they don't overlap.
+	private MIS_State mis_state = MIS_State.NON_MIS;
+	private boolean mis_decided = false;
+	private boolean round_recv = false;
+	private ArrayList<Node> received = new ArrayList<>();
+	private int[] neigh_cols = new int[6];
+	
+	private enum MIS_State {
+		IN_MIS,
+		NON_MIS
+	}
 	
 	@Override
 	public void checkRequirements() throws WrongConfigurationException {
@@ -36,17 +59,10 @@ public class TreeNode extends Node {
 
 	@Override
 	public void handleMessages(Inbox inbox) {
-//		while(inbox.hasNext()) {
-//			Message m = inbox.next();
-//			if(m instanceof MarkMessage) {
-//				if(parent == null || !inbox.getSender().equals(parent)) {
-//					continue;// don't consider mark messages sent by children
-//				}
-//				this.setColor(Color.RED);
-//				broadcast(m);
-//			}
-//		}
-		six_vcol(inbox);
+		if (flag_sixVcol_finished == false)
+			six_vcol(inbox);
+		else
+			vcol_mis(inbox);
 	}
 	
 	/** 
@@ -81,15 +97,27 @@ public class TreeNode extends Node {
 			// All parents send their color to all their children (which gives log * n run-time, instead of height of tree, like regualr broadcast)
 			flag_sixVcol_started = true;
 			// Send color of parent to children
-			Message m = new ColorMessage(this.six_vcol_color, round);
+			Message m = new ColorMessage(this.six_vcol_color);
 			broadcast_children(m);
+			
+			this.six_vcol_current_round_bits = CustomGlobal.SIX_VCOL_MAX_COLOR_BITS;
 		}
 		
-		while(inbox.hasNext() && (this.six_vcol_color < 0 || this.six_vcol_color > 5)) {
+		// The root will change his color in every round by 'randomizing' the k index (like random parent. But root has no parent so we do this manually).
+		// We also don't want to send message at the last round, since the next round will receive the Color message, but this phase will stop.
+		if (parent == null && flag_sixVcol_finished == false && round < CustomGlobal.SIX_VCOL_SIMULATION_ROUNDS) {
+			// (root color + 1) Modulo (n)
+			int root_parent_color = ((this.six_vcol_color + 1) % CustomGlobal.NUM_OF_NODES);
+			Message m = new ColorMessage(root_parent_color);
+			logger.logln(this + " sends message to self: " + m);
+			sendDirect(m, this);
+		}
+		
+		while(inbox.hasNext() && round <= CustomGlobal.SIX_VCOL_SIMULATION_ROUNDS) {
 			Message m = inbox.next();
+			
 			// Received from parent
-			if(m instanceof ColorMessage) {				
-				round += 1;
+			if(m instanceof ColorMessage) {	
 				logger.logln(this + " received message from parent: " + m.toString());
 				/*
 				 * "In every round thereafter, each node receives a color c_p from its parent 
@@ -103,16 +131,16 @@ public class TreeNode extends Node {
 				String ci_binary = Integer.toBinaryString(ci);
 				
 				// Zero-pad
-				int bin_len_diff = Math.abs(ci_binary.length() - cp_binary.length());
-				if (cp_binary.length() < ci_binary.length()) {
-					for(int i = 0; i < bin_len_diff; i++) {
-						cp_binary = "0" + cp_binary;
-					}
-				} else {
-					for(int i = 0; i < bin_len_diff; i++) {
-						ci_binary = "0" + ci_binary;
-					}
-				}
+				// Note: to activate assert, use '-ea' JVM flag.
+				assert cp_binary.length() < this.six_vcol_current_round_bits;
+				assert ci_binary.length() < this.six_vcol_current_round_bits;
+				
+				while(cp_binary.length() < six_vcol_current_round_bits)
+					cp_binary = "0" + cp_binary;
+				while(ci_binary.length() < six_vcol_current_round_bits)
+					ci_binary = "0" + ci_binary;
+				
+				
 				
 				// Find smallest k-index 
 				int k_index = -1;
@@ -127,7 +155,7 @@ public class TreeNode extends Node {
 				
 				assert k_index == -1; // At the beginning all nodes have different colors. Its impossible to not find any difference.
 				
-				/*
+				/*	
 				 * "It then assigns a new color to itself by a bit string representing k
 				 * concatenated with the value of c_i in the kth position."
 				 */
@@ -141,20 +169,76 @@ public class TreeNode extends Node {
 				 * "This new value of c_i is sent to children to be received
 				 * in the next round and used for the same computation in the next round."
 				 */
-				ColorMessage new_color_message = new ColorMessage(this.six_vcol_color, round);
+				ColorMessage new_color_message = new ColorMessage(this.six_vcol_color);
 				broadcast_children(new_color_message);
 				
 				/*
 				 * "This process continues until each node has a color in the range {0,..,5}..."
 				 */
+				// Recalculate amount of bits for next round
+				this.six_vcol_current_round_bits = 1 + (int)Math.ceil(Math.log(this.six_vcol_current_round_bits) / Math.log(2));
 			}
 		}
-		if (flag_sixVcol_finished == false && this.six_vcol_color >= 0 && this.six_vcol_color < 6) {
-			logger.logln(this + " finished running, vertex color is in range {0,..,5}");
+		if (flag_sixVcol_finished == false && round > CustomGlobal.SIX_VCOL_SIMULATION_ROUNDS) {
 			flag_sixVcol_finished = true;
+			logger.logln(this + " finished coloring.");
+			Tools.repaintGUI();
 		}
+		round += 1;
 	}
 
+	// The Vcol_MIS algorithm
+	private void vcol_mis(Inbox inbox) {
+		if (flag_mis_started == false) {
+			flag_mis_started = true;
+			FLAG_MIS_STARTED_GLOBAL = true;
+			logger.logln(this+ " started MIS algo");
+			
+			// Start by broadcasting the round message with the color after six_vcol algorithm.
+			Message m = new RoundMessage(this.six_vcol_color);
+			broadcast(m);
+		} else {
+			while(inbox.hasNext()) {
+				Message m = inbox.next();
+				Node sender = inbox.getSender();
+				
+				logger.logln(this + " received message: " + m.toString() + " from: " + sender + ", current round: " + mis_round);
+
+				if (m instanceof RoundMessage) {
+					int sender_color = ((RoundMessage) m).getColor();
+					if (this.six_vcol_color == mis_round && this.mis_state == MIS_State.NON_MIS && mis_decided == false) {
+						Message m2 = new DecidedMessage();
+						logger.logln(this + " broadcasts: " + m2);
+						broadcast(m2);
+						
+						this.mis_state = MIS_State.IN_MIS;
+						this.mis_decided = true;
+						logger.logln(this + " changed MIS state to: INMIS");
+					} else {
+						Message m2 = new UndecidedMessage();
+						// Send message back to the sender
+						logger.logln(this + " sending: " + m2);
+						send(m2, inbox.getSender());
+					}
+					
+					this.round_recv = true;
+				} else if (m instanceof DecidedMessage) {
+					received.add(inbox.getSender());
+					this.mis_state = MIS_State.NON_MIS;
+					this.mis_decided = true;
+					logger.logln(this + " changed MIS state to: NONMIS");
+				} else if (m instanceof UndecidedMessage) {
+					received.add(inbox.getSender());
+				}
+//				if (round_recv && (received)) {
+//					
+//				}
+			}
+			
+			mis_round ++;
+		}
+	}
+	
 	@Override
 	public void init() {
 		// "Initially, all nodes have color represented by their identifiers" (for total of n colors)
@@ -179,12 +263,63 @@ public class TreeNode extends Node {
 	public void draw(Graphics g, PositionTransformation pt, boolean highlight) {
 		String text = ""+six_vcol_color;
 		int fontSize = 12;
-		Color textColor = Color.YELLOW;
-		if (flag_sixVcol_finished) {
-			this.setColor(Color.GREEN);
-			textColor = Color.RED;
+		Color textColor;
+		switch(this.six_vcol_color) {
+			case 0:
+				this.setColor(Color.YELLOW);
+				textColor = Color.BLACK;
+				break;
+			case 1:
+				this.setColor(Color.CYAN);
+				textColor = Color.BLACK;
+				break;
+			case 2:
+				this.setColor(Color.RED);
+				textColor = Color.BLACK;
+				break;
+			case 3:
+				this.setColor(Color.GRAY);
+				textColor= Color.BLACK;
+				break;
+			case 4:
+				this.setColor(Color.MAGENTA);
+				textColor = Color.BLACK;
+				break;
+			case 5:
+				this.setColor(Color.PINK);
+				textColor = Color.BLACK;
+				break;
+			default:
+				this.setColor(Color.BLACK);
+				textColor = Color.YELLOW;
+				break;
 		}
 		this.drawNodeAsDiskWithText(g, pt, highlight, text, fontSize, textColor);
+		
+		if (flag_mis_started == true) {
+			// Can be looked into the source code for this.drawNodeAsDiskWithText
+			// Basically took some functionality and apply to my code so it visually appealing
+			
+			String mis_text = "Undecided";
+			Color c = g.getColor();
+
+			if (this.mis_decided) {
+				if (this.mis_state == MIS_State.IN_MIS) {
+					g.setColor(Color.RED);
+					mis_text = "INMIS";
+				} else {
+					g.setColor(Color.BLUE);
+					mis_text = "NONMIS";
+				}
+			} else {
+				g.setColor(Color.BLACK);
+			}
+			Font font = new Font(null, 0, (int) (fontSize * pt.getZoomFactor())); 
+			FontMetrics fm = g.getFontMetrics(font); 
+			int h = (int) Math.ceil(fm.getHeight());
+			g.drawString(mis_text, pt.guiX, pt.guiY - (int)(h*0.5));
+			g.setColor(c);
+		}
 	}
 
 	@Override
