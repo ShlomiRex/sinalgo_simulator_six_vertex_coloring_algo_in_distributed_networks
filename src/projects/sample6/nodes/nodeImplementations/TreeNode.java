@@ -44,9 +44,8 @@ public class TreeNode extends Node {
 	public static boolean FLAG_MIS_STARTED_GLOBAL = false; // Used for MyEdge to draw 2 strings on the same edge so they don't overlap.
 	private MIS_State mis_state = MIS_State.NON_MIS;
 	private boolean mis_decided = false;
-	private boolean round_recv = false;
 	private ArrayList<Node> received = new ArrayList<>();
-	private int[] neigh_cols = new int[6];
+	private boolean is_have_neighbour_in_mis = false;
 	
 	private enum MIS_State {
 		IN_MIS,
@@ -200,42 +199,31 @@ public class TreeNode extends Node {
 		} else {
 			while(inbox.hasNext()) {
 				Message m = inbox.next();
-				Node sender = inbox.getSender();
 				
-				logger.logln(this + " received message: " + m.toString() + " from: " + sender + ", current round: " + mis_round);
-
-				if (m instanceof RoundMessage) {
-					int sender_color = ((RoundMessage) m).getColor();
-					if (this.six_vcol_color == mis_round && this.mis_state == MIS_State.NON_MIS && mis_decided == false) {
-						Message m2 = new DecidedMessage();
-						logger.logln(this + " broadcasts: " + m2);
-						broadcast(m2);
-						
-						this.mis_state = MIS_State.IN_MIS;
-						this.mis_decided = true;
-						logger.logln(this + " changed MIS state to: INMIS");
-					} else {
-						Message m2 = new UndecidedMessage();
-						// Send message back to the sender
-						logger.logln(this + " sending: " + m2);
-						send(m2, inbox.getSender());
-					}
-					
-					this.round_recv = true;
-				} else if (m instanceof DecidedMessage) {
-					received.add(inbox.getSender());
-					this.mis_state = MIS_State.NON_MIS;
-					this.mis_decided = true;
-					logger.logln(this + " changed MIS state to: NONMIS");
-				} else if (m instanceof UndecidedMessage) {
-					received.add(inbox.getSender());
+				if (m instanceof DecidedMessage) {
+					is_have_neighbour_in_mis = true;
 				}
-//				if (round_recv && (received)) {
-//					
-//				}
 			}
 			
-			mis_round ++;
+			logger.logln(this + " received: " + received);
+			
+			if (mis_decided == false && this.six_vcol_color == mis_round) {
+				if (is_have_neighbour_in_mis == false) {
+					Message m2 = new DecidedMessage();
+					logger.logln(this + " broadcasts: " + m2);
+					broadcast(m2);
+					
+					this.mis_state = MIS_State.IN_MIS;
+					this.mis_decided = true;
+					logger.logln(this + " changed MIS state to: INMIS");
+				} else {
+					Message m2 = new UndecidedMessage();
+					this.mis_state = MIS_State.NON_MIS;
+					this.mis_decided = true;
+					broadcast(m2);
+				}
+			}
+			mis_round++;
 		}
 	}
 	
